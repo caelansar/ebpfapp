@@ -3,8 +3,14 @@
 
 use core::mem;
 
-use aya_ebpf::{bindings::xdp_action, macros::xdp, programs::XdpContext};
+use aya_ebpf::{
+    bindings::xdp_action,
+    macros::{map, xdp},
+    maps::Queue,
+    programs::XdpContext,
+};
 use aya_log_ebpf::{error, info};
+use ebpfapp_common::SourceAddr;
 use network_types::{
     eth::{EthHdr, EtherType},
     ip::{IpProto, Ipv4Hdr},
@@ -19,6 +25,9 @@ pub fn ebpfapp(ctx: XdpContext) -> u32 {
         Err(_) => xdp_action::XDP_ABORTED,
     }
 }
+
+#[map]
+pub static mut SOURCE_ADDR_QUEUE: Queue<SourceAddr> = Queue::with_max_entries(1024, 0);
 
 #[inline(always)]
 fn ptr_at<T>(ctx: &XdpContext, offset: usize) -> Result<*const T, ()> {
@@ -74,6 +83,18 @@ fn try_ebpfapp(ctx: XdpContext) -> Result<u32, ()> {
 
     info!(&ctx, "received a packet, proto: {}", protocol as u8);
     info!(&ctx, "SRC IP: {:i}, SRC PORT: {}", source_addr, source_port);
+
+    let source_addr = SourceAddr {
+        addr: source_addr,
+        port: source_port,
+    };
+    unsafe {
+        #[allow(static_mut_refs)]
+        SOURCE_ADDR_QUEUE.push(&source_addr, 0).map_err(|e| {
+            error!(&ctx, "push to queue err: {}", e);
+        })?;
+    }
+
     Ok(xdp_action::XDP_PASS)
 }
 

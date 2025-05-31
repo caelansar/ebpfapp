@@ -1,9 +1,13 @@
 use anyhow::Context as _;
-use aya::programs::{Xdp, XdpFlags};
+use aya::{
+    maps::Queue,
+    programs::{Xdp, XdpFlags},
+};
 use clap::Parser;
+use ebpfapp_common::SourceAddr;
 #[rustfmt::skip]
-use log::{debug, warn};
-use tokio::signal;
+use log::{debug, warn, info};
+// use tokio::signal;
 
 #[derive(Debug, Parser)]
 struct Opt {
@@ -46,10 +50,20 @@ async fn main() -> anyhow::Result<()> {
     program.attach(&iface, XdpFlags::default())
         .context("failed to attach the XDP program with default flags - try changing XdpFlags::default() to XdpFlags::SKB_MODE")?;
 
-    let ctrl_c = signal::ctrl_c();
-    println!("Waiting for Ctrl-C...");
-    ctrl_c.await?;
-    println!("Exiting...");
+    let mut xdp_queue: Queue<_, SourceAddr> =
+        Queue::try_from(ebpf.map_mut("SOURCE_ADDR_QUEUE").unwrap())?;
 
-    Ok(())
+    loop {
+        while let Ok(source_addr) = xdp_queue.pop(0) {
+            let v4 = std::net::IpAddr::V4(std::net::Ipv4Addr::from(source_addr.addr));
+            info!("addr: {}, port: {}", v4, source_addr.port);
+        }
+    }
+
+    // let ctrl_c = signal::ctrl_c();
+    // println!("Waiting for Ctrl-C...");
+    // ctrl_c.await?;
+    // println!("Exiting...");
+
+    // Ok(())
 }
